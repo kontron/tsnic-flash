@@ -1,0 +1,286 @@
+#include <stdio.h>
+#include <string.h>
+#include <stdarg.h>
+#include <errno.h>
+#include <stdlib.h>
+#include <pciaccess.h>
+#include <unistd.h>
+#include <asm/byteorder.h>
+
+static void __attribute__((noreturn)) error(const char *fmt, ...)
+{
+	va_list ap;
+	va_start(ap, fmt);
+	vprintf(fmt, ap);
+	va_end(ap);
+	exit(EXIT_FAILURE);
+}
+
+static volatile void *virt_addr;
+
+#define PCI_BAR 3
+#define CSR_OFFSET 0x00000100
+#define MEM_OFFSET 0x02000000
+#define MAX_FILE_SIZE (32 * 1024 * 1024)
+
+enum {
+	WR_ENABLE                = CSR_OFFSET + 0x0000,
+	WR_DISABLE               = CSR_OFFSET + 0x0004,
+	WR_STATUS                = CSR_OFFSET + 0x0008,
+	RD_STATUS                = CSR_OFFSET + 0x000c,
+	SECTOR_ERASE             = CSR_OFFSET + 0x0010,
+	SUBSECTOR_ERASE          = CSR_OFFSET + 0x0014,
+	CONTROL                  = CSR_OFFSET + 0x0020,
+	WR_NON_VOLATILE_CONF_REG = CSR_OFFSET + 0x0034,
+	RD_NON_VOLATILE_CONF_REG = CSR_OFFSET + 0x0038,
+	RD_FLAG_STATUS_REG       = CSR_OFFSET + 0x003c,
+	CLR_FLAG_STATUS_REG      = CSR_OFFSET + 0x0040,
+	BULK_ERASE               = CSR_OFFSET + 0x0044,
+	DIE_ERASE                = CSR_OFFSET + 0x0048,
+	FOURBYTES_ADDR_EN        = CSR_OFFSET + 0x004c,
+	FOURBYTES_ADDR_EX        = CSR_OFFSET + 0x0050,
+	SECTOR_PROTECT           = CSR_OFFSET + 0x0054,
+	RD_MEMORY_CAPACITY_ID    = CSR_OFFSET + 0x0058,
+};
+
+static inline uint32_t pci_read(int offset)
+{
+	return *(uint32_t*)(virt_addr + offset);
+}
+
+static inline void pci_write(int offset, uint32_t value)
+{
+	*(uint32_t*)(virt_addr + offset) = value;
+}
+
+static inline uint64_t pci_read64(int offset)
+{
+	return *(uint64_t*)(virt_addr + offset);
+}
+
+static inline void pci_write64(int offset, uint64_t value)
+{
+	*(uint64_t*)(virt_addr + offset) = value;
+}
+
+static inline uint8_t mirror_byte(uint8_t val)
+{
+	static const uint8_t lut[256] = {
+		0x00, 0x80, 0x40, 0xc0, 0x20, 0xa0, 0x60, 0xe0,
+		0x10, 0x90, 0x50, 0xd0, 0x30, 0xb0, 0x70, 0xf0,
+		0x08, 0x88, 0x48, 0xc8, 0x28, 0xa8, 0x68, 0xe8,
+		0x18, 0x98, 0x58, 0xd8, 0x38, 0xb8, 0x78, 0xf8,
+		0x04, 0x84, 0x44, 0xc4, 0x24, 0xa4, 0x64, 0xe4,
+		0x14, 0x94, 0x54, 0xd4, 0x34, 0xb4, 0x74, 0xf4,
+		0x0c, 0x8c, 0x4c, 0xcc, 0x2c, 0xac, 0x6c, 0xec,
+		0x1c, 0x9c, 0x5c, 0xdc, 0x3c, 0xbc, 0x7c, 0xfc,
+		0x02, 0x82, 0x42, 0xc2, 0x22, 0xa2, 0x62, 0xe2,
+		0x12, 0x92, 0x52, 0xd2, 0x32, 0xb2, 0x72, 0xf2,
+		0x0a, 0x8a, 0x4a, 0xca, 0x2a, 0xaa, 0x6a, 0xea,
+		0x1a, 0x9a, 0x5a, 0xda, 0x3a, 0xba, 0x7a, 0xfa,
+		0x06, 0x86, 0x46, 0xc6, 0x26, 0xa6, 0x66, 0xe6,
+		0x16, 0x96, 0x56, 0xd6, 0x36, 0xb6, 0x76, 0xf6,
+		0x0e, 0x8e, 0x4e, 0xce, 0x2e, 0xae, 0x6e, 0xee,
+		0x1e, 0x9e, 0x5e, 0xde, 0x3e, 0xbe, 0x7e, 0xfe,
+		0x01, 0x81, 0x41, 0xc1, 0x21, 0xa1, 0x61, 0xe1,
+		0x11, 0x91, 0x51, 0xd1, 0x31, 0xb1, 0x71, 0xf1,
+		0x09, 0x89, 0x49, 0xc9, 0x29, 0xa9, 0x69, 0xe9,
+		0x19, 0x99, 0x59, 0xd9, 0x39, 0xb9, 0x79, 0xf9,
+		0x05, 0x85, 0x45, 0xc5, 0x25, 0xa5, 0x65, 0xe5,
+		0x15, 0x95, 0x55, 0xd5, 0x35, 0xb5, 0x75, 0xf5,
+		0x0d, 0x8d, 0x4d, 0xcd, 0x2d, 0xad, 0x6d, 0xed,
+		0x1d, 0x9d, 0x5d, 0xdd, 0x3d, 0xbd, 0x7d, 0xfd,
+		0x03, 0x83, 0x43, 0xc3, 0x23, 0xa3, 0x63, 0xe3,
+		0x13, 0x93, 0x53, 0xd3, 0x33, 0xb3, 0x73, 0xf3,
+		0x0b, 0x8b, 0x4b, 0xcb, 0x2b, 0xab, 0x6b, 0xeb,
+		0x1b, 0x9b, 0x5b, 0xdb, 0x3b, 0xbb, 0x7b, 0xfb,
+		0x07, 0x87, 0x47, 0xc7, 0x27, 0xa7, 0x67, 0xe7,
+		0x17, 0x97, 0x57, 0xd7, 0x37, 0xb7, 0x77, 0xf7,
+		0x0f, 0x8f, 0x4f, 0xcf, 0x2f, 0xaf, 0x6f, 0xef,
+		0x1f, 0x9f, 0x5f, 0xdf, 0x3f, 0xbf, 0x7f, 0xff,
+	};
+
+	return lut[val];
+}
+
+
+static void usage(char *progname) {
+	printf("usage: %s <rbf file>\n", progname);
+}
+
+static int spi_write_enable(void)
+{
+	pci_write(WR_ENABLE, 1);
+	return 0;
+}
+
+static int spi_write_disable(void)
+{
+	pci_write(WR_DISABLE, 1);
+	return 0;
+}
+
+static int spi_erase_sector(int sector)
+{
+	printf("erase sector %d\n", sector);
+	pci_write(SECTOR_ERASE, sector);
+	usleep(10000);
+
+	return 0;
+}
+
+static int spi_read_buf(void *buf, int len, int offset)
+{
+	int i;
+
+	printf("read @%08x\n", offset);
+	for (i = 0; i < len; i += 8)
+		*((uint64_t *)(buf + i)) = __le64_to_cpu(pci_read64(MEM_OFFSET + offset + i));
+
+	return 0;
+}
+
+static int spi_write_buf(void *buf, int len, int offset)
+{
+	int i;
+
+	printf("write @%08x\n", offset);
+	for (i = 0; i < len; i += 8)
+		pci_write64(MEM_OFFSET + offset + i, __cpu_to_le64p(buf + i));
+
+	return 0;
+}
+
+static int spi_flash(char *flashfile)
+{
+	FILE *fp;
+	long size;
+	char buf[1024];
+	int sector, offset;
+	unsigned int i;
+
+	printf("status=%08x\n", pci_read(RD_STATUS));
+	printf("capacity_id=%08x\n", pci_read(RD_MEMORY_CAPACITY_ID));
+
+	fp = fopen(flashfile, "r");
+	fseek(fp, 0, SEEK_END);
+	size = ftell(fp);
+	fseek(fp, 0, SEEK_SET);
+
+	printf("Filesize = %ld\n", size);
+	if (size > MAX_FILE_SIZE) {
+		printf("File too big (max %d bytes).\n", MAX_FILE_SIZE);
+		fclose(fp);
+		return 1;
+	}
+
+	spi_write_enable();
+	for (sector = 0; sector * 64 * 1024 < size; sector++)
+		spi_erase_sector(sector);
+	spi_write_disable();
+
+	spi_write_enable();
+	for (offset = 0; offset < size; offset += sizeof(buf)) {
+		fread(buf, sizeof(buf), 1, fp);
+		/* mirror bits */
+		for (i = 0; i < sizeof(buf); i++)
+			buf[i] = mirror_byte(buf[i]);
+		spi_write_buf(buf, sizeof(buf), offset);
+	}
+	spi_write_disable();
+
+	fclose(fp);
+
+	return 0;
+}
+
+static int spi_dump(char *dumpfile)
+{
+	FILE *fp;
+	long size = MAX_FILE_SIZE;
+	char buf[1024];
+	int offset;
+
+	fp = fopen(dumpfile, "w");
+
+	for (offset = 0; offset < size; offset += sizeof(buf)) {
+		spi_read_buf(buf, sizeof(buf), offset);
+#if 0
+		/* mirror bits */
+		for (i = 0; i < sizeof(buf); i++)
+			buf[i] = mirror_byte(buf[i]);
+#endif
+		fwrite(buf, sizeof(buf), 1, fp);
+	}
+	spi_write_disable();
+
+	fclose(fp);
+
+	return 0;
+}
+
+int main(int argc, char **argv)
+{
+	int rc;
+	struct pci_device *dev;
+	struct pci_device_iterator *iter;
+	struct pci_id_match match = {
+		.vendor_id = 0x1059,
+		.device_id = 0xa100,
+		.subvendor_id = PCI_MATCH_ANY,
+		.subdevice_id = PCI_MATCH_ANY,
+	};
+
+	if (argc <= 1) {
+		usage(argv[0]);
+		return EXIT_FAILURE;
+	}
+
+	pci_system_init();
+
+	iter = pci_id_match_iterator_create(&match);
+#if 0
+	while ((dev = pci_device_next(iter))) {
+		printf("%d:%d.%d\n", dev->bus, dev->dev, dev->func);
+	}
+#endif
+	dev = pci_device_next(iter);
+	if (!dev) {
+		error("PCI device not found.\n");
+	}
+	pci_iterator_destroy(iter);
+
+	rc = pci_device_probe(dev);
+	if (rc) {
+		error("Could not probe PCI device: %s (%d).\n", strerror(rc), rc);
+	}
+
+	printf("PCI BAR%d base address: %lXh\n", PCI_BAR, dev->regions[PCI_BAR].base_addr);
+
+	rc = pci_device_map_range(dev, dev->regions[PCI_BAR].base_addr,
+			dev->regions[PCI_BAR].size, PCI_DEV_MAP_FLAG_WRITABLE, (void**)&virt_addr);
+	if (rc) {
+		error("Could not map PCI device: %s (%d).\n", strerror(rc), rc);
+	}
+
+	if (!strcmp(argv[1], "--dump") && argc >= 2) {
+		rc = spi_dump(argv[2]);
+		if (rc) {
+			error("Error while dumping (%d).\n", rc);
+		}
+	} else {
+		rc = spi_flash(argv[1]);
+		if (rc) {
+			error("Error while flashing (%d).\n", rc);
+		}
+	}
+
+	rc = pci_device_unmap_range(dev, (void*)virt_addr, dev->regions[PCI_BAR].size);
+	if (rc) {
+		error("Could not unmap PCI device: %s (%d).\n", strerror(rc), rc);
+	}
+
+	pci_system_cleanup();
+
+	return 0;
+}
