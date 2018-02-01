@@ -183,31 +183,34 @@ static int spi_flash(char *flashfile)
 	FILE *fp;
 	long size;
 	char buf[1024];
-	int sector, offset;
-	unsigned int i;
+	int sector;
+	unsigned int offset, i;
 
 	fp = fopen(flashfile, "r");
 	if (!fp) {
 		error("Could not open file %s.\n", flashfile);
 	}
+
+	/* get filesize */
 	fseek(fp, 0, SEEK_END);
 	size = ftell(fp);
 	fseek(fp, 0, SEEK_SET);
 
 	printf("Filesize = %ld\n", size);
-	if (size > MAX_FILE_SIZE) {
-		printf("File too big (max %d bytes).\n", MAX_FILE_SIZE);
+	if (size + flash_offset > flash_info->size) {
+		printf("File too big (max %ld bytes).\n", flash_info->size - flash_offset);
 		fclose(fp);
 		return 1;
 	}
 
 	spi_write_enable();
-	for (sector = 0; (sector - 1) * 64 * 1024 < size; sector++)
+	for (sector = 0; sector * 64 * 1024 < size; sector++)
 		spi_erase_sector(sector);
 	spi_write_disable();
 
 	spi_write_enable();
-	for (offset = 0; offset < size; offset += sizeof(buf)) {
+	for (offset = flash_offset; offset < flash_offset + size; offset += sizeof(buf)) {
+		memset(buf, 0xff, sizeof(buf));
 		fread(buf, sizeof(buf), 1, fp);
 		/* mirror bits */
 		for (i = 0; i < sizeof(buf); i++)
@@ -224,22 +227,20 @@ static int spi_flash(char *flashfile)
 static int spi_dump(char *dumpfile)
 {
 	FILE *fp;
-	long size = MAX_FILE_SIZE;
+	long size = flash_info->size;
 	char buf[1024];
 	int offset;
+	unsigned int i;
 
 	fp = fopen(dumpfile, "w");
 
 	for (offset = 0; offset < size; offset += sizeof(buf)) {
 		spi_read_buf(buf, sizeof(buf), offset);
-#if 0
 		/* mirror bits */
 		for (i = 0; i < sizeof(buf); i++)
 			buf[i] = mirror_byte(buf[i]);
-#endif
 		fwrite(buf, sizeof(buf), 1, fp);
 	}
-	spi_write_disable();
 
 	fclose(fp);
 
