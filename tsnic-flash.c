@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <stdbool.h>
 #include <stdarg.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -7,19 +8,8 @@
 #include <unistd.h>
 #include <asm/byteorder.h>
 
-static void __attribute__((noreturn)) error(const char *fmt, ...)
-{
-	va_list ap;
-	va_start(ap, fmt);
-	vprintf(fmt, ap);
-	va_end(ap);
-	exit(EXIT_FAILURE);
-}
-
-static volatile void *virt_addr;
-
-#define PCI_BAR 3
-#define CSR_OFFSET 0x00000100
+#define PCI_BAR 5
+#define CSR_OFFSET 0x00000000
 #define MEM_OFFSET 0x02000000
 #define MAX_FILE_SIZE (32 * 1024 * 1024)
 
@@ -42,6 +32,37 @@ enum {
 	SECTOR_PROTECT           = CSR_OFFSET + 0x0054,
 	RD_MEMORY_CAPACITY_ID    = CSR_OFFSET + 0x0058,
 };
+
+struct flash_info {
+	uint32_t id;
+	size_t size;
+	const char *name;
+};
+
+static bool quiet = false;
+static size_t flash_offset = 0;
+static volatile void *virt_addr;
+static struct flash_info *flash_info = NULL;
+
+#define MB (1024*1024)
+static struct flash_info flash_infos[256] = {
+	{ .id = 0x15, .size =  2 * MB, .name = "EPCQ16" },
+	{ .id = 0x16, .size =  4 * MB, .name = "EPCQ32" },
+	{ .id = 0x17, .size =  8 * MB, .name = "EPCQ64" },
+	{ .id = 0x18, .size = 16 * MB, .name = "EPCQ128" },
+	{ .id = 0x19, .size = 32 * MB, .name = "EPCQ256" },
+	{ .id = 0x20, .size = 64 * MB, .name = "EPCQ512/A" },
+	{ 0 }
+};
+
+static void __attribute__((noreturn)) error(const char *fmt, ...)
+{
+	va_list ap;
+	va_start(ap, fmt);
+	vprintf(fmt, ap);
+	va_end(ap);
+	exit(EXIT_FAILURE);
+}
 
 static inline uint32_t pci_read(int offset)
 {
@@ -103,11 +124,6 @@ static inline uint8_t mirror_byte(uint8_t val)
 	return lut[val];
 }
 
-
-static void usage(char *progname) {
-	printf("usage: %s <rbf file>\n", progname);
-}
-
 static int spi_write_enable(void)
 {
 	pci_write(WR_ENABLE, 1);
@@ -124,6 +140,8 @@ static int spi_erase_sector(int sector)
 {
 	printf("erase sector %d\n", sector);
 	pci_write(SECTOR_ERASE, sector);
+
+	/* without this sleep the system hangs.. */
 	usleep(10000);
 
 	return 0;
@@ -151,6 +169,15 @@ static int spi_write_buf(void *buf, int len, int offset)
 	return 0;
 }
 
+static struct flash_info *spi_flash_detect()
+{
+	struct flash_info *info = flash_infos;
+	uint32_t id = pci_read(RD_MEMORY_CAPACITY_ID);
+
+	while (info->id && info->id != id && info++);
+	return (info->id) ? info : NULL;
+}
+
 static int spi_flash(char *flashfile)
 {
 	FILE *fp;
@@ -159,10 +186,10 @@ static int spi_flash(char *flashfile)
 	int sector, offset;
 	unsigned int i;
 
-	printf("status=%08x\n", pci_read(RD_STATUS));
-	printf("capacity_id=%08x\n", pci_read(RD_MEMORY_CAPACITY_ID));
-
 	fp = fopen(flashfile, "r");
+	if (!fp) {
+		error("Could not open file %s.\n", flashfile);
+	}
 	fseek(fp, 0, SEEK_END);
 	size = ftell(fp);
 	fseek(fp, 0, SEEK_SET);
@@ -175,7 +202,7 @@ static int spi_flash(char *flashfile)
 	}
 
 	spi_write_enable();
-	for (sector = 0; sector * 64 * 1024 < size; sector++)
+	for (sector = 0; (sector - 1) * 64 * 1024 < size; sector++)
 		spi_erase_sector(sector);
 	spi_write_disable();
 
@@ -219,9 +246,18 @@ static int spi_dump(char *dumpfile)
 	return 0;
 }
 
+static void usage(const char *prog)
+{
+	fprintf(stderr, "Usage: %s [-d <devnum>] [-q] <rpdfile>\n", prog);
+}
+
 int main(int argc, char **argv)
 {
 	int rc;
+	int devnum = 1;
+	bool dump = false;
+	bool probe_only = false;
+	int opt;
 	struct pci_device *dev;
 	struct pci_device_iterator *iter;
 	struct pci_id_match match = {
@@ -231,31 +267,53 @@ int main(int argc, char **argv)
 		.subdevice_id = PCI_MATCH_ANY,
 	};
 
-	if (argc <= 1) {
-		usage(argv[0]);
-		return EXIT_FAILURE;
+	while ((opt = getopt(argc, argv, "qd:O:DP")) != -1) {
+		switch (opt) {
+		case 'q':
+			quiet = true;
+			break;
+		case 'd':
+			devnum = atoi(optarg);
+			devnum = (devnum < 1) ? 1 : devnum;
+			break;
+		case 'P':
+			probe_only = true;
+			break;
+		case 'D':
+			dump = true;
+			break;
+		case 'O':
+			flash_offset = atoi(optarg);
+			flash_offset &= ~0xf;
+			break;
+		default:
+			usage(argv[0]);
+			return EXIT_FAILURE;
+		}
 	}
 
 	pci_system_init();
 
 	iter = pci_id_match_iterator_create(&match);
-#if 0
-	while ((dev = pci_device_next(iter))) {
-		printf("%d:%d.%d\n", dev->bus, dev->dev, dev->func);
+	while (devnum--) {
+		dev = pci_device_next(iter);
 	}
-#endif
-	dev = pci_device_next(iter);
+	pci_iterator_destroy(iter);
+
 	if (!dev) {
 		error("PCI device not found.\n");
 	}
-	pci_iterator_destroy(iter);
 
 	rc = pci_device_probe(dev);
 	if (rc) {
 		error("Could not probe PCI device: %s (%d).\n", strerror(rc), rc);
 	}
 
-	printf("PCI BAR%d base address: %lXh\n", PCI_BAR, dev->regions[PCI_BAR].base_addr);
+	if (dev->regions[PCI_BAR].base_addr) {
+		printf("PCI BAR%d base address: %lXh\n", PCI_BAR, dev->regions[PCI_BAR].base_addr);
+	} else {
+		error("PCI BAR%d not available.\n", PCI_BAR);
+	}
 
 	rc = pci_device_map_range(dev, dev->regions[PCI_BAR].base_addr,
 			dev->regions[PCI_BAR].size, PCI_DEV_MAP_FLAG_WRITABLE, (void**)&virt_addr);
@@ -263,15 +321,31 @@ int main(int argc, char **argv)
 		error("Could not map PCI device: %s (%d).\n", strerror(rc), rc);
 	}
 
-	if (!strcmp(argv[1], "--dump") && argc >= 2) {
-		rc = spi_dump(argv[2]);
-		if (rc) {
-			error("Error while dumping (%d).\n", rc);
-		}
+	flash_info = spi_flash_detect();
+	if (flash_info) {
+		printf("Found flash chip %s, size %ld kB.\n",
+				flash_info->name, flash_info->size / 1024);
 	} else {
-		rc = spi_flash(argv[1]);
-		if (rc) {
-			error("Error while flashing (%d).\n", rc);
+		error("No supported flash chip found (%x)\n",
+			pci_read(RD_MEMORY_CAPACITY_ID));
+	}
+
+	if (!probe_only) {
+		if (argc - optind < 1) {
+			usage(argv[0]);
+			return EXIT_FAILURE;
+		}
+
+		if (dump) {
+			rc = spi_dump(argv[optind]);
+			if (rc) {
+				error("Error while dumping (%d).\n", rc);
+			}
+		} else {
+			rc = spi_flash(argv[optind]);
+			if (rc) {
+				error("Error while flashing (%d).\n", rc);
+			}
 		}
 	}
 
