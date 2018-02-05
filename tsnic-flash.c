@@ -36,7 +36,6 @@
 #define PCI_BAR 5
 #define CSR_OFFSET 0x00000000
 #define MEM_OFFSET 0x02000000
-#define MAX_FILE_SIZE (32 * 1024 * 1024)
 
 enum {
 	WR_ENABLE                = CSR_OFFSET + 0x0000,
@@ -65,6 +64,7 @@ struct flash_info {
 };
 
 static bool quiet = false;
+static bool batch_mode = false;
 static size_t flash_offset = 0;
 static volatile void *virt_addr;
 static struct flash_info *flash_info = NULL;
@@ -163,11 +163,14 @@ static int spi_write_disable(void)
 
 static int spi_erase_sector(int sector)
 {
-	printf("erase sector %d\n", sector);
-	pci_write(SECTOR_ERASE, sector);
+	spi_write_enable();
+	usleep(100);
+	pci_write(SECTOR_ERASE, sector * 64 * 1024);
+	usleep(100);
 
-	/* without this sleep the system hangs.. */
-	usleep(10000);
+	while (pci_read(RD_STATUS) & 1) {
+		usleep(100000);
+	}
 
 	return 0;
 }
@@ -176,9 +179,9 @@ static int spi_read_buf(void *buf, int len, int offset)
 {
 	int i;
 
-	printf("read @%08x\n", offset);
-	for (i = 0; i < len; i += 8)
+	for (i = 0; i < len; i += 8) {
 		*((uint64_t *)(buf + i)) = __le64_to_cpu(pci_read64(MEM_OFFSET + offset + i));
+	}
 
 	return 0;
 }
@@ -187,9 +190,9 @@ static int spi_write_buf(void *buf, int len, int offset)
 {
 	int i;
 
-	printf("write @%08x\n", offset);
-	for (i = 0; i < len; i += 8)
+	for (i = 0; i < len; i += 8) {
 		pci_write64(MEM_OFFSET + offset + i, __cpu_to_le64p(buf + i));
+	}
 
 	return 0;
 }
@@ -221,17 +224,20 @@ static int spi_flash(char *flashfile)
 	size = ftell(fp);
 	fseek(fp, 0, SEEK_SET);
 
-	printf("Filesize = %ld\n", size);
+	printf("Filesize is %ld bytes.\n", size);
+	printf("Internal offset is %lXh.\n", flash_offset);
 	if (size + flash_offset > flash_info->size) {
 		printf("File too big (max %ld bytes).\n", flash_info->size - flash_offset);
 		fclose(fp);
 		return 1;
 	}
 
-	spi_write_enable();
-	for (sector = 0; sector * 64 * 1024 < size; sector++)
+	for (sector = 0; sector * 64 * 1024 < size; sector++) {
+		printf("\rErasing sector %03d", sector);
+		fflush(stdout);
 		spi_erase_sector(sector);
-	spi_write_disable();
+	}
+	printf("\rErasing done.      \n");
 
 	spi_write_enable();
 	for (offset = flash_offset; offset < flash_offset + size; offset += sizeof(buf)) {
@@ -240,9 +246,58 @@ static int spi_flash(char *flashfile)
 		/* mirror bits */
 		for (i = 0; i < sizeof(buf); i++)
 			buf[i] = mirror_byte(buf[i]);
+		printf("\rWriting at address %08Xh", offset);
+		fflush(stdout);
 		spi_write_buf(buf, sizeof(buf), offset);
 	}
 	spi_write_disable();
+	printf("\rWriting done.                \n");
+
+	fclose(fp);
+
+	return 0;
+}
+
+static int spi_verify(char *flashfile)
+{
+	FILE *fp;
+	long size;
+	char buf[1024];
+	char buf2[1024];
+	unsigned int offset, i;
+
+	fp = fopen(flashfile, "r");
+	if (!fp) {
+		error("Could not open file %s.\n", flashfile);
+	}
+
+	/* get filesize */
+	fseek(fp, 0, SEEK_END);
+	size = ftell(fp);
+	fseek(fp, 0, SEEK_SET);
+
+	if (size + flash_offset > flash_info->size) {
+		printf("File too big (max %ld bytes).\n", flash_info->size - flash_offset);
+		fclose(fp);
+		return 1;
+	}
+
+	for (offset = flash_offset; offset < flash_offset + size; offset += sizeof(buf)) {
+		memset(buf, 0xff, sizeof(buf));
+		memset(buf2, 0xff, sizeof(buf));
+		fread(buf, sizeof(buf), 1, fp);
+		/* mirror bits */
+		for (i = 0; i < sizeof(buf); i++)
+			buf[i] = mirror_byte(buf[i]);
+		printf("\rVerifying address %08Xh", offset);
+		spi_read_buf(buf2, sizeof(buf2), offset);
+		if (memcmp(buf, buf2, sizeof(buf)) != 0) {
+			printf("\rVerifying failed at %08Xh\n", offset);
+			fflush(stdout);
+			return 1;
+		}
+	}
+	printf("\rVerifying done.              \n");
 
 	fclose(fp);
 
@@ -258,6 +313,9 @@ static int spi_dump(char *dumpfile)
 	unsigned int i;
 
 	fp = fopen(dumpfile, "w");
+	if (!fp) {
+		error("Could not write file %s.\n", dumpfile);
+	}
 
 	for (offset = 0; offset < size; offset += sizeof(buf)) {
 		spi_read_buf(buf, sizeof(buf), offset);
@@ -284,7 +342,7 @@ int main(int argc, char **argv)
 	bool dump = false;
 	bool probe_only = false;
 	int opt;
-	struct pci_device *dev;
+	struct pci_device *dev = NULL;
 	struct pci_device_iterator *iter;
 	struct pci_id_match match = {
 		.vendor_id = 0x1059,
@@ -293,7 +351,7 @@ int main(int argc, char **argv)
 		.subdevice_id = PCI_MATCH_ANY,
 	};
 
-	while ((opt = getopt(argc, argv, "qd:O:DP")) != -1) {
+	while ((opt = getopt(argc, argv, "qd:O:DPb")) != -1) {
 		switch (opt) {
 		case 'q':
 			quiet = true;
@@ -301,6 +359,9 @@ int main(int argc, char **argv)
 		case 'd':
 			devnum = atoi(optarg);
 			devnum = (devnum < 1) ? 1 : devnum;
+			break;
+		case 'b':
+			batch_mode = true;
 			break;
 		case 'P':
 			probe_only = true;
@@ -335,9 +396,7 @@ int main(int argc, char **argv)
 		error("Could not probe PCI device: %s (%d).\n", strerror(rc), rc);
 	}
 
-	if (dev->regions[PCI_BAR].base_addr) {
-		printf("PCI BAR%d base address: %lXh\n", PCI_BAR, dev->regions[PCI_BAR].base_addr);
-	} else {
+	if (!dev->regions[PCI_BAR].base_addr) {
 		error("PCI BAR%d not available.\n", PCI_BAR);
 	}
 
@@ -356,6 +415,12 @@ int main(int argc, char **argv)
 			pci_read(RD_MEMORY_CAPACITY_ID));
 	}
 
+	if (!batch_mode) {
+		printf("\n\nWARNING! FLASHING STARTS IN 5 SECONDS.\n"
+				"DO NOT TURN OFF POWER WHILE FLASHING!\n\n");
+		sleep(5);
+	}
+
 	if (!probe_only) {
 		if (argc - optind < 1) {
 			usage(argv[0]);
@@ -364,23 +429,18 @@ int main(int argc, char **argv)
 
 		if (dump) {
 			rc = spi_dump(argv[optind]);
-			if (rc) {
-				error("Error while dumping (%d).\n", rc);
-			}
+			if (rc) goto out;
 		} else {
 			rc = spi_flash(argv[optind]);
-			if (rc) {
-				error("Error while flashing (%d).\n", rc);
-			}
+			if (rc) goto out;
+			rc = spi_verify(argv[optind]);
+			if (rc) goto out;
 		}
 	}
 
-	rc = pci_device_unmap_range(dev, (void*)virt_addr, dev->regions[PCI_BAR].size);
-	if (rc) {
-		error("Could not unmap PCI device: %s (%d).\n", strerror(rc), rc);
-	}
-
+out:
+	pci_device_unmap_range(dev, (void*)virt_addr, dev->regions[PCI_BAR].size);
 	pci_system_cleanup();
 
-	return 0;
+	return (rc) ? EXIT_FAILURE : EXIT_SUCCESS;
 }
