@@ -77,7 +77,7 @@ static struct flash_info flash_infos[256] = {
 	{ .id = 0x18, .size = 16 * MB, .name = "EPCQ128" },
 	{ .id = 0x19, .size = 32 * MB, .name = "EPCQ256" },
 	{ .id = 0x20, .size = 64 * MB, .name = "EPCQ512/A" },
-	{ 0 }
+	{ 0, 0, NULL }
 };
 
 static void __attribute__((noreturn)) error(const char *fmt, ...)
