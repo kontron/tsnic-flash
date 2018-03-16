@@ -226,9 +226,9 @@ static int spi_flash(char *flashfile)
 	fseek(fp, 0, SEEK_SET);
 
 	printf("Filesize is %ld bytes.\n", size);
-	printf("Internal offset is %lXh.\n", flash_offset);
+	printf("Internal offset is %zXh.\n", flash_offset);
 	if (size + flash_offset > flash_info->size) {
-		printf("File too big (max %ld bytes).\n", flash_info->size - flash_offset);
+		printf("File too big (max %zd bytes).\n", flash_info->size - flash_offset);
 		fclose(fp);
 		return 1;
 	}
@@ -278,7 +278,7 @@ static int spi_verify(char *flashfile)
 	fseek(fp, 0, SEEK_SET);
 
 	if (size + flash_offset > flash_info->size) {
-		printf("File too big (max %ld bytes).\n", flash_info->size - flash_offset);
+		printf("File too big (max %zd bytes).\n", flash_info->size - flash_offset);
 		fclose(fp);
 		return 1;
 	}
@@ -409,7 +409,7 @@ int main(int argc, char **argv)
 
 	flash_info = spi_flash_detect();
 	if (flash_info) {
-		printf("Found flash chip %s, size %ld kB.\n",
+		printf("Found flash chip %s, size %zd kB.\n",
 				flash_info->name, flash_info->size / 1024);
 	} else {
 		error("No supported flash chip found (%x)\n",
