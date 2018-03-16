@@ -351,6 +351,7 @@ int main(int argc, char **argv)
 		.subvendor_id = PCI_MATCH_ANY,
 		.subdevice_id = PCI_MATCH_ANY,
 	};
+	long pg_size;
 
 	while ((opt = getopt(argc, argv, "qd:O:DPb")) != -1) {
 		switch (opt) {
@@ -406,6 +407,15 @@ int main(int argc, char **argv)
 	if (rc) {
 		error("Could not map PCI device: %s (%d).\n", strerror(rc), rc);
 	}
+
+	/*
+	 * linux only maps whole pages, so if the PCI BAR is not page aligned, we have to add
+	 * the missing offset ourselfs.
+	 */
+	pg_size = sysconf(_SC_PAGESIZE);
+	virt_addr += dev->regions[PCI_BAR].base_addr & (pg_size - 1);
+
+
 
 	flash_info = spi_flash_detect();
 	if (flash_info) {
