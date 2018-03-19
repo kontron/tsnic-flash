@@ -35,8 +35,8 @@
 #include <asm/byteorder.h>
 
 #define PCI_BAR 5
-#define CSR_OFFSET 0x00000000
-#define MEM_OFFSET 0x02000000
+#define CSR_OFFSET 0x02000000
+#define MEM_OFFSET 0x00000000
 
 enum {
 	WR_ENABLE                = CSR_OFFSET + 0x0000,
