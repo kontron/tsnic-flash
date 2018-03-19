@@ -34,6 +34,7 @@
 #include <unistd.h>
 #include <asm/byteorder.h>
 
+#define PROD_NAME "PCIE-0400-TSN"
 #define PCI_BAR 5
 #define CSR_OFFSET 0x02000000
 #define MEM_OFFSET 0x00000000
@@ -333,7 +334,20 @@ static int spi_dump(char *dumpfile)
 
 static void usage(const char *prog)
 {
-	fprintf(stderr, "Usage: %s [-d <devnum>] [-q] <rpdfile>\n", prog);
+	fprintf(stderr,
+			"Program the SPI flash of a " PROD_NAME " card.\n"
+			"\n"
+			"Usage: %s [options] <rpdfile>\n"
+			"\n"
+			"Options:\n"
+			"  -q           - Be quiet.\n"
+			"  -d [num]     - Select device. Can be used if there are more\n"
+			"                 than one " PROD_NAME " cards.\n"
+			"  -O [offset]  - Start programming at offset\n"
+			"  -b           - Batch mode. Don't print programming warning.\n"
+			"  -P           - Probe only. Just probe flash chip and exit.\n"
+			"  -D           - Dump flash contents to file.\n"
+			"  -h           - This help.\n", prog);
 }
 
 int main(int argc, char **argv)
@@ -353,7 +367,7 @@ int main(int argc, char **argv)
 	};
 	long pg_size;
 
-	while ((opt = getopt(argc, argv, "qd:O:DPb")) != -1) {
+	while ((opt = getopt(argc, argv, "hqd:O:DPb")) != -1) {
 		switch (opt) {
 		case 'q':
 			quiet = true;
@@ -375,6 +389,9 @@ int main(int argc, char **argv)
 			flash_offset = atoi(optarg);
 			flash_offset &= ~0xf;
 			break;
+		case 'h':
+			usage(argv[0]);
+			return EXIT_SUCCESS;
 		default:
 			usage(argv[0]);
 			return EXIT_FAILURE;
