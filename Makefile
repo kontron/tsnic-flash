@@ -13,7 +13,7 @@ INSTALL ?= install
 
 # install directories
 PREFIX ?= /usr
-BINDIR ?= $(PREFIX)/bin
+BINDIR ?= $(PREFIX)/sbin
 INCLUDEDIR ?= $(PREFIX)/include
 LIBDIR ?= $(PREFIX)/lib
 

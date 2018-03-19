@@ -20,4 +20,4 @@ tsnic firmware update tool
 %{make_install}
 
 %files
-/bin/tsnic-flash
+/usr/sbin/tsnic-flash
