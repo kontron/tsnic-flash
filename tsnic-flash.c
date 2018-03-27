@@ -356,6 +356,7 @@ static void usage(const char *prog)
 			"  -R           - Force reconfiguration.\n"
 			"  -P           - Probe only. Just probe flash chip and exit.\n"
 			"  -D           - Dump flash contents to file.\n"
+			"  -V           - Show version.\n"
 			"  -h           - This help.\n"
 			"\n", prog);
 }
