@@ -32,6 +32,7 @@
 #include <stdlib.h>
 #include <pciaccess.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <asm/byteorder.h>
 
 #ifndef VERSION
@@ -341,6 +342,7 @@ static int spi_dump(char *dumpfile)
 static void usage(const char *prog)
 {
 	fprintf(stderr,
+			"\n"
 			"Program the SPI flash of a " PROD_NAME " card.\n"
 			"\n"
 			"Usage: %s [options] <rpdfile>\n"
@@ -354,7 +356,8 @@ static void usage(const char *prog)
 			"  -R           - Force reconfiguration.\n"
 			"  -P           - Probe only. Just probe flash chip and exit.\n"
 			"  -D           - Dump flash contents to file.\n"
-			"  -h           - This help.\n", prog);
+			"  -h           - This help.\n"
+			"\n", prog);
 }
 
 int main(int argc, char **argv)
@@ -408,6 +411,18 @@ int main(int argc, char **argv)
 			return EXIT_SUCCESS;
 		default:
 			usage(argv[0]);
+			return EXIT_FAILURE;
+		}
+	}
+
+	if (!probe_only && !force_reconfig) {
+		struct stat sb;
+		if (argc - optind < 1) {
+			usage(argv[0]);
+			return EXIT_FAILURE;
+		}
+		if (stat(argv[optind], &sb)) {
+			printf("File not found.\n");
 			return EXIT_FAILURE;
 		}
 	}
@@ -477,11 +492,6 @@ int main(int argc, char **argv)
 	}
 
 	if (!probe_only) {
-		if (argc - optind < 1) {
-			usage(argv[0]);
-			return EXIT_FAILURE;
-		}
-
 		if (dump) {
 			rc = spi_dump(argv[optind]);
 			if (rc) goto out;
