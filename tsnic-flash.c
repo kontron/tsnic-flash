@@ -34,6 +34,10 @@
 #include <unistd.h>
 #include <asm/byteorder.h>
 
+#ifndef VERSION
+#define VERSION "unknown"
+#endif
+
 #define PROD_NAME "PCIE-0400-TSN"
 #define PCI_BAR 5
 #define MEM_OFFSET 0x00000000
@@ -371,7 +375,7 @@ int main(int argc, char **argv)
 	};
 	long pg_size;
 
-	while ((opt = getopt(argc, argv, "hqd:O:DPbR")) != -1) {
+	while ((opt = getopt(argc, argv, "hqd:O:DPbRV")) != -1) {
 		switch (opt) {
 		case 'q':
 			quiet = true;
@@ -398,6 +402,9 @@ int main(int argc, char **argv)
 			break;
 		case 'h':
 			usage(argv[0]);
+			return EXIT_SUCCESS;
+		case 'V':
+			printf("%s v%s\n", argv[0], VERSION);
 			return EXIT_SUCCESS;
 		default:
 			usage(argv[0]);
