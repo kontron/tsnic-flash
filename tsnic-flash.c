@@ -407,7 +407,7 @@ int main(int argc, char **argv)
 			usage(argv[0]);
 			return EXIT_SUCCESS;
 		case 'V':
-			printf("%s v%s\n", argv[0], VERSION);
+			printf("%s\n", VERSION);
 			return EXIT_SUCCESS;
 		default:
 			usage(argv[0]);
