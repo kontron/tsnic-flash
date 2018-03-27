@@ -36,8 +36,10 @@
 
 #define PROD_NAME "PCIE-0400-TSN"
 #define PCI_BAR 5
-#define CSR_OFFSET 0x02000000
 #define MEM_OFFSET 0x00000000
+#define CSR_OFFSET 0x02000000
+#define UPD_OFFSET 0x02000140
+#define FORCE_RECONFIG ((UPD_OFFSET) + 0x0018)
 
 enum {
 	WR_ENABLE                = CSR_OFFSET + 0x0000,
@@ -345,6 +347,7 @@ static void usage(const char *prog)
 			"                 than one " PROD_NAME " cards.\n"
 			"  -O [offset]  - Start programming at offset\n"
 			"  -b           - Batch mode. Don't print programming warning.\n"
+			"  -R           - Force reconfiguration.\n"
 			"  -P           - Probe only. Just probe flash chip and exit.\n"
 			"  -D           - Dump flash contents to file.\n"
 			"  -h           - This help.\n", prog);
@@ -356,6 +359,7 @@ int main(int argc, char **argv)
 	int devnum = 1;
 	bool dump = false;
 	bool probe_only = false;
+	bool force_reconfig = false;
 	int opt;
 	struct pci_device *dev = NULL;
 	struct pci_device_iterator *iter;
@@ -367,7 +371,7 @@ int main(int argc, char **argv)
 	};
 	long pg_size;
 
-	while ((opt = getopt(argc, argv, "hqd:O:DPb")) != -1) {
+	while ((opt = getopt(argc, argv, "hqd:O:DPbR")) != -1) {
 		switch (opt) {
 		case 'q':
 			quiet = true;
@@ -381,6 +385,9 @@ int main(int argc, char **argv)
 			break;
 		case 'P':
 			probe_only = true;
+			break;
+		case 'R':
+			force_reconfig = true;
 			break;
 		case 'D':
 			dump = true;
@@ -432,7 +439,20 @@ int main(int argc, char **argv)
 	pg_size = sysconf(_SC_PAGESIZE);
 	virt_addr += dev->regions[PCI_BAR].base_addr & (pg_size - 1);
 
-
+	if (force_reconfig) {
+		pci_write(FORCE_RECONFIG, 1);
+		usleep(100);
+		if (pci_read(FORCE_RECONFIG) == 0xffffffff) {
+			printf(
+				"Reconfiguration successful. The card is not accessible anymore.\n"
+				"Please reboot.\n"
+			);
+			return EXIT_SUCCESS;
+		} else {
+			printf("Reconfiguration failed.\n");
+			return EXIT_FAILURE;
+		}
+	}
 
 	flash_info = spi_flash_detect();
 	if (flash_info) {
