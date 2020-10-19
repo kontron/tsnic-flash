@@ -4,6 +4,7 @@ Release:       %SNAPSHOT%%{?dist}
 Summary:       tsnic firmware update tool
 License:       BSD License (two clause)
 Source:        %SRC_PACKAGE_NAME%.tar.gz
+BuildRequires: gcc
 BuildRequires: libpciaccess-devel
 Requires:      libpciaccess
 
