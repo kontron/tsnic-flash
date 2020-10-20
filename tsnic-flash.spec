@@ -8,6 +8,7 @@ BuildRequires: gcc
 BuildRequires: libpciaccess-devel
 Requires:      libpciaccess
 
+%global debug_package %{nil}
 
 %description
 tsnic firmware update tool
