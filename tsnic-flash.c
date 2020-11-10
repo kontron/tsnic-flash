@@ -416,7 +416,7 @@ int main(int argc, char **argv)
 		}
 	}
 
-	if (!probe_only && !force_reconfig) {
+	if (!probe_only && !force_reconfig && !dump) {
 		struct stat sb;
 		if (argc - optind < 1) {
 			usage(argv[0]);
