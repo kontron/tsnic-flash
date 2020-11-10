@@ -248,7 +248,6 @@ static int spi_flash(char *flashfile)
 	}
 	printf("\rErasing done.      \n");
 
-	spi_write_enable();
 	for (offset = flash_offset; offset < flash_offset + size; offset += sizeof(buf)) {
 		memset(buf, 0xff, sizeof(buf));
 		fread(buf, sizeof(buf), 1, fp);
@@ -259,7 +258,6 @@ static int spi_flash(char *flashfile)
 		fflush(stdout);
 		spi_write_buf(buf, sizeof(buf), offset);
 	}
-	spi_write_disable();
 	printf("\rWriting done.                \n");
 
 	fclose(fp);
