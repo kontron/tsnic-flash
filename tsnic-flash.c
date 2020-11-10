@@ -164,9 +164,27 @@ static int spi_write_enable(void)
 	return 0;
 }
 
-static int spi_write_disable(void)
+static void spi_poll_ready(void)
 {
-	pci_write(WR_DISABLE, 1);
+	while (pci_read(RD_STATUS) & 1)
+		usleep(100000);
+}
+
+static int spi_protect_all(void)
+{
+	spi_write_enable();
+	pci_write(WR_STATUS, 0x1c);
+	spi_poll_ready();
+
+	return 0;
+}
+
+static int spi_unprotect_all(void)
+{
+	spi_write_enable();
+	pci_write(WR_STATUS, 0);
+	spi_poll_ready();
+
 	return 0;
 }
 
@@ -175,11 +193,7 @@ static int spi_erase_sector(int sector)
 	spi_write_enable();
 	usleep(100);
 	pci_write(SECTOR_ERASE, sector * 64 * 1024);
-	usleep(100);
-
-	while (pci_read(RD_STATUS) & 1) {
-		usleep(100000);
-	}
+	spi_poll_ready();
 
 	return 0;
 }
@@ -241,6 +255,7 @@ static int spi_flash(char *flashfile)
 		return 1;
 	}
 
+	spi_unprotect_all();
 	for (sector = 0; sector * 64 * 1024 < size; sector++) {
 		printf("\rErasing sector %03d", sector);
 		fflush(stdout);
@@ -258,6 +273,7 @@ static int spi_flash(char *flashfile)
 		fflush(stdout);
 		spi_write_buf(buf, sizeof(buf), offset);
 	}
+	spi_protect_all();
 	printf("\rWriting done.                \n");
 
 	fclose(fp);
