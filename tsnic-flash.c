@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Kontron Europe GmbH
+ * Copyright (c) 2018-2020, Kontron Europe GmbH
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
