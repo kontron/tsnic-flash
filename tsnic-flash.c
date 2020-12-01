@@ -166,8 +166,15 @@ static int spi_write_enable(void)
 
 static void spi_poll_ready(void)
 {
-	while (pci_read(RD_STATUS) & 1)
+	printf("%s", __func__);
+	fflush(stdout);
+	while (pci_read(RD_STATUS) & 1) {
 		usleep(100000);
+		printf(".");
+		fflush(stdout);
+	}
+	printf("done!\n");
+	fflush(stdout);
 }
 
 static int spi_protect_all(void)
@@ -190,9 +197,12 @@ static int spi_unprotect_all(void)
 
 static int spi_erase_sector(int sector)
 {
+	printf("%s\n", __func__);
 	spi_write_enable();
 	usleep(100);
+	printf("%s: before write\n", __func__);
 	pci_write(SECTOR_ERASE, sector * 64 * 1024);
+	printf("%s:after write\n", __func__);
 	spi_poll_ready();
 
 	return 0;
