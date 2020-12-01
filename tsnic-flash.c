@@ -170,6 +170,19 @@ static int spi_write_disable(void)
 	return 0;
 }
 
+static int spi_unprotect_all(void)
+{
+	spi_write_enable();
+	usleep(100);
+	pci_write(WR_STATUS, 0);
+	usleep(100);
+
+	while (pci_read(RD_STATUS) & 1)
+		usleep(100000);
+
+	return 0;
+}
+
 static int spi_erase_sector(int sector)
 {
 	spi_write_enable();
@@ -241,6 +254,7 @@ static int spi_flash(char *flashfile)
 		return 1;
 	}
 
+	spi_unprotect_all();
 	for (sector = 0; sector * 64 * 1024 < size; sector++) {
 		printf("\rErasing sector %03d", sector);
 		fflush(stdout);
