@@ -1,3 +1,4 @@
 *.d
 *.o
 tsnic-flash
+tsnic-flash-static
