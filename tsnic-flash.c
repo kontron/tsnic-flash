@@ -160,27 +160,25 @@ static inline uint8_t mirror_byte(uint8_t val)
 
 static int spi_write_enable(void)
 {
+	usleep(100);
 	pci_write(WR_ENABLE, 1);
+	usleep(100);
 	return 0;
 }
 
 static void spi_poll_ready(void)
 {
-	printf("%s", __func__);
-	fflush(stdout);
-	while (pci_read(RD_STATUS) & 1) {
+	usleep(100);
+	while (pci_read(RD_STATUS) & 1)
 		usleep(100000);
-		printf(".");
-		fflush(stdout);
-	}
-	printf("done!\n");
-	fflush(stdout);
 }
 
 static int spi_protect_all(void)
 {
 	spi_write_enable();
+	usleep(100);
 	pci_write(WR_STATUS, 0x1c);
+	usleep(100);
 	spi_poll_ready();
 
 	return 0;
@@ -189,7 +187,9 @@ static int spi_protect_all(void)
 static int spi_unprotect_all(void)
 {
 	spi_write_enable();
+	usleep(100);
 	pci_write(WR_STATUS, 0);
+	usleep(100);
 	spi_poll_ready();
 
 	return 0;
@@ -197,12 +197,10 @@ static int spi_unprotect_all(void)
 
 static int spi_erase_sector(int sector)
 {
-	printf("%s\n", __func__);
 	spi_write_enable();
 	usleep(100);
-	printf("%s: before write\n", __func__);
 	pci_write(SECTOR_ERASE, sector * 64 * 1024);
-	printf("%s:after write\n", __func__);
+	usleep(100);
 	spi_poll_ready();
 
 	return 0;
@@ -212,9 +210,8 @@ static int spi_read_buf(void *buf, int len, int offset)
 {
 	int i;
 
-	for (i = 0; i < len; i += 8) {
+	for (i = 0; i < len; i += 8)
 		*((uint64_t *)(buf + i)) = __le64_to_cpu(pci_read64(MEM_OFFSET + offset + i));
-	}
 
 	return 0;
 }
@@ -223,9 +220,8 @@ static int spi_write_buf(void *buf, int len, int offset)
 {
 	int i;
 
-	for (i = 0; i < len; i += 8) {
+	for (i = 0; i < len; i += 8)
 		pci_write64(MEM_OFFSET + offset + i, __cpu_to_le64p(buf + i));
-	}
 
 	return 0;
 }
