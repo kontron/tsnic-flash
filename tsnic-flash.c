@@ -77,6 +77,7 @@ static bool batch_mode = false;
 static size_t flash_offset = 0;
 static volatile void *virt_addr;
 static struct flash_info *flash_info = NULL;
+static bool broken_bus_access = false;
 
 #define MB (1024*1024)
 static struct flash_info flash_infos[256] = {
@@ -166,6 +167,17 @@ static int spi_write_enable(void)
 
 static void spi_poll_ready(void)
 {
+	/*
+	 * On older FPGA releases a PCI read might actually hang resulting in
+	 * a complete freeze. Root cause analysis showed that the a ready signal
+	 * of the internal bus wasn't functioning correctly. A subsequent read
+	 * access might then never complete. As a workaround give any prior PCI
+	 * access some time to terminate.
+	 */
+	if (broken_bus_access) {
+		usleep(100000);
+	}
+
 	while (pci_read(RD_STATUS) & 1) {
 		usleep(100000);
 	}
@@ -468,6 +480,12 @@ int main(int argc, char **argv)
 			dev->regions[PCI_BAR].size, PCI_DEV_MAP_FLAG_WRITABLE, (void**)&virt_addr);
 	if (rc) {
 		error("Could not map PCI device: %s (%d).\n", strerror(rc), rc);
+	}
+
+	if (dev->revision < 20) {
+		printf("Detected old FPGA image (v%d). Enabling bus access workaround.\n",
+			dev->revision);
+		broken_bus_access = true;
 	}
 
 	/*
