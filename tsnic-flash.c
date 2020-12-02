@@ -166,8 +166,9 @@ static int spi_write_enable(void)
 
 static void spi_poll_ready(void)
 {
-	while (pci_read(RD_STATUS) & 1)
+	while (pci_read(RD_STATUS) & 1) {
 		usleep(100000);
+	}
 }
 
 static int spi_protect_all(void)
